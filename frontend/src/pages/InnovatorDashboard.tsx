@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { API_BASE_URL } from '../config'
 import type { AppNavigationHandler } from '../App'
 import DashboardLayout from '../components/DashboardLayout'
-import InspirationalQuotes, { inspirationalPortraits } from '../components/InspirationalQuotes'
 import ProjectCard from '../components/ProjectCard'
 import StatCard from '../components/ui/StatCard'
 import { categories, milestones, profiles, projects } from '../data/mockData'
@@ -141,35 +140,32 @@ function InnovatorDashboard({ onNavigate }: InnovatorDashboardProps) {
       person: 'Sun Tzu',
       title: 'Ancient strategist',
       quote: 'The supreme art of war is to subdue the enemy without fighting.',
-      image: inspirationalPortraits.sunTzu,
+      image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=500&q=80',
     },
     {
       person: 'Confucius',
       title: 'Wisdom teacher',
       quote: 'It does not matter how slowly you go as long as you do not stop.',
-      image: inspirationalPortraits.confucius,
+      image: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=500&q=80',
     },
     {
       person: 'Mencius',
       title: 'Philosopher',
       quote: 'When heaven is about to entrust a great task to a person, it first tests their heart with hardship.',
-      image: inspirationalPortraits.mencius,
+      image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=500&q=80',
     },
     {
       person: 'Naruto Uzumaki',
       title: 'Anime inspiration',
       quote: 'It is not the face that makes someone a hero; it is the heart.',
-      image: inspirationalPortraits.naruto,
+      image: 'https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=500&q=80',
     },
     {
       person: 'Monkey D. Luffy',
       title: 'Anime inspiration',
       quote: 'I don’t want to conquer anything. I just think the guy with the most freedom in the world is the pirate king.',
-      image: inspirationalPortraits.luffy,
+      image: 'https://images.unsplash.com/photo-1521119989659-a83eee488004?auto=format&fit=crop&w=500&q=80',
     },
-    { person: 'Confucius', title: 'Wisdom teacher', quote: 'The superior man is modest in his speech, but exceeds in his actions.', image: inspirationalPortraits.confucius },
-    { person: 'Mencius', title: 'Philosopher', quote: 'The great man is he who does not lose his childlike heart.', image: inspirationalPortraits.mencius },
-    { person: 'Sun Tzu', title: 'Ancient strategist', quote: 'Victorious warriors win first and then go to war.', image: inspirationalPortraits.sunTzu },
   ]
 
   const [editableMilestones, setEditableMilestones] = useState([
@@ -718,7 +714,25 @@ function InnovatorDashboard({ onNavigate }: InnovatorDashboardProps) {
           </div>
         </section>
 
-        <InspirationalQuotes quotes={motivationalNotes} eyebrow="Motivation wall" />
+        <section className="rounded-[30px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-5 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Motivation wall</p>
+              <h3 className="mt-2 text-xl font-extrabold text-slate-900">Wisdom for the road ahead</h3>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {motivationalNotes.map((note) => (
+              <div key={note.person} className="rounded-[24px] border border-slate-200 bg-slate-50 p-3">
+                <img src={note.image} alt={note.person} className="h-28 w-full rounded-2xl object-cover" />
+                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-orange-600">{note.title}</p>
+                <p className="mt-1 text-base font-extrabold text-slate-900">{note.person}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">“{note.quote}”</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
         <section className="grid gap-6 lg:grid-cols-3">
           <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
