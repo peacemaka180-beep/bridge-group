@@ -30,6 +30,7 @@ import DashboardLayout from '../components/DashboardLayout'
 import StatCard from '../components/ui/StatCard'
 import ProgressBar from '../components/ui/ProgressBar'
 import type { AppNavigationHandler } from '../App'
+import InspirationalQuotes, { inspirationalPortraits } from '../components/InspirationalQuotes'
 
 const investor = profiles.find((profile) => profile.is_investor && !profile.is_innovator) ?? profiles[1]
 
@@ -338,6 +339,16 @@ function InvestorDashboard({ onNavigate }: InvestorDashboardProps) {
           <StatCard title="Returns" value={`$${Math.round(financeSummary.inflow).toLocaleString()}`} change={loading ? 'Loading ledger' : 'Live payouts'} trend="up" accent="green" />
           <StatCard title="Net cashflow" value={`$${Math.round(financeSummary.net).toLocaleString()}`} change={finance ? 'Updated live' : 'Projected'} trend="up" accent="amber" />
         </section>
+
+        <InspirationalQuotes
+          eyebrow="Investor perspective"
+          heading="Patience, value, and long-term thinking"
+          quotes={[
+            { person: 'Warren Buffett', title: 'Investor', quote: 'Price is what you pay. Value is what you get.', image: inspirationalPortraits.warrenBuffett },
+            { person: 'Sun Tzu', title: 'Strategist', quote: 'Victorious warriors win first and then go to war.', image: inspirationalPortraits.sunTzu },
+            { person: 'Confucius', title: 'Wisdom teacher', quote: 'The superior man is modest in his speech, but exceeds in his actions.', image: inspirationalPortraits.confucius },
+          ]}
+        />
 
         <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-5 flex items-center justify-between gap-3">
