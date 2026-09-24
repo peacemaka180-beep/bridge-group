@@ -11,7 +11,6 @@ import {
 } from 'lucide-react'
 import type { AppNavigationHandler } from '../App'
 import { categories } from '../data/mockData'
-import InspirationalQuotes, { inspirationalPortraits } from '../components/InspirationalQuotes'
 
 const categoryIconMap = {
   Technology: Cpu,
@@ -424,19 +423,6 @@ function LandingPage({ onNavigate }: LandingPageProps) {
               </div>
             </div>
           </div>
-        </section>
-
-        <section className="container-shell pb-16">
-          <InspirationalQuotes
-            eyebrow="Ideas that move us"
-            heading="A little wisdom for the work ahead"
-            className="border-transparent bg-transparent p-0 shadow-none"
-            quotes={[
-              { person: 'Warren Buffett', title: 'Investor', quote: 'Someone’s sitting in the shade today because someone planted a tree a long time ago.', image: inspirationalPortraits.warrenBuffett },
-              { person: 'Confucius', title: 'Wisdom teacher', quote: 'The superior man is modest in his speech, but exceeds in his actions.', image: inspirationalPortraits.confucius },
-              { person: 'Mencius', title: 'Philosopher', quote: 'The great man is he who does not lose his childlike heart.', image: inspirationalPortraits.mencius },
-            ]}
-          />
         </section>
 
         <section className="container-shell py-16">
