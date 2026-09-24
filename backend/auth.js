@@ -75,12 +75,12 @@ export function requireRole(...allowedRoles) {
   }
 }
 
-export function ensureSeedUsers() {
+export async function ensureSeedUsers() {
   if (process.env.ENABLE_DEMO_DATA !== 'true') {
     return
   }
 
-  const existing = db.prepare('SELECT COUNT(*) as count FROM users').get()
+  const existing = await db.prepare('SELECT COUNT(*) as count FROM users').get()
   if (Number(existing.count) > 0) {
     return
   }
@@ -115,13 +115,11 @@ export function ensureSeedUsers() {
     },
   ]
 
-  const insert = db.prepare(`
-    INSERT INTO users (full_name, email, password_hash, role, company, bio, avatar_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `)
-
   for (const user of users) {
-    insert.run(
+    await db.prepare(`
+      INSERT INTO users (full_name, email, password_hash, role, company, bio, avatar_url)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
       user.full_name,
       user.email,
       hashPassword(user.password),
