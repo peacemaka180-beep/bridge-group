@@ -13,12 +13,12 @@ type InspirationalQuotesProps = {
 }
 
 export const inspirationalPortraits = {
-  sunTzu: 'https://upload.wikimedia.org/wikipedia/commons/c/cf/%E5%90%B4%E5%8F%B8%E9%A9%AC%E5%AD%99%E6%AD%A6.jpg',
-  confucius: 'https://upload.wikimedia.org/wikipedia/commons/f/f2/%E5%AD%94%E5%AD%90%E7%87%95%E5%B1%85%E5%83%8F.jpg',
-  mencius: 'https://upload.wikimedia.org/wikipedia/commons/a/af/Mencius.jpg',
-  naruto: 'https://naruto-official.com/anime/series/naruto1_visual.webp',
-  luffy: 'https://www.onepiece-film.jp/wordpress/wp-content/themes/onepiece-film-red/common/character/chara03.png',
-  warrenBuffett: 'https://upload.wikimedia.org/wikipedia/commons/5/51/Warren_Buffett_at_the_2015_SelectUSA_Investment_Summit.jpg',
+  sunTzu: '/images/quotes/sun-tzu.jpg',
+  confucius: '/images/quotes/confucius.jpg',
+  mencius: '/images/quotes/mencius.jpg',
+  naruto: '/images/quotes/naruto.webp',
+  luffy: '/images/quotes/luffy.png',
+  warrenBuffett: '/images/quotes/warren-buffett.jpg',
 }
 
 export default function InspirationalQuotes({ quotes, heading = 'Wisdom for the road ahead', eyebrow = 'Words to build by', className = '' }: InspirationalQuotesProps) {
