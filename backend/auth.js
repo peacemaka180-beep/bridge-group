@@ -115,11 +115,13 @@ export async function ensureSeedUsers() {
     },
   ]
 
+  const insert = db.prepare(`
+    INSERT INTO users (full_name, email, password_hash, role, company, bio, avatar_url)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+  `)
+
   for (const user of users) {
-    await db.prepare(`
-      INSERT INTO users (full_name, email, password_hash, role, company, bio, avatar_url)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
+    await insert.run(
       user.full_name,
       user.email,
       hashPassword(user.password),

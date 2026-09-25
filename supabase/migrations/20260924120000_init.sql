@@ -230,17 +230,25 @@ alter table public.community_posts enable row level security;
 alter table public.idea_requests enable row level security;
 alter table public.project_follows enable row level security;
 
--- All application data is accessed through the authenticated Render API using
--- DATABASE_URL. Keep the browser roles out of these custom-auth tables.
 drop policy if exists "categories_read" on public.categories;
-drop policy if exists "projects_read_authenticated" on public.projects;
-drop policy if exists "users_read_self" on public.users;
-drop policy if exists "ideas_owner_or_staff" on public.idea_requests;
-drop policy if exists "messages_participants_read" on public.messages;
-drop policy if exists "community_posts_read" on public.community_posts;
+create policy "categories_read" on public.categories for select using (true);
 
-revoke all on all tables in schema public from anon, authenticated;
-grant all on all tables in schema public to service_role;
-grant usage, select on all sequences in schema public to service_role;
-alter default privileges in schema public grant all on tables to service_role;
-alter default privileges in schema public grant usage, select on sequences to service_role;
+drop policy if exists "projects_read_authenticated" on public.projects;
+create policy "projects_read_authenticated" on public.projects
+  for select to authenticated using (true);
+
+drop policy if exists "users_read_self" on public.users;
+create policy "users_read_self" on public.users
+  for select to authenticated using (id::text = auth.uid()::text);
+
+drop policy if exists "ideas_owner_or_staff" on public.idea_requests;
+create policy "ideas_owner_or_staff" on public.idea_requests
+  for select to authenticated using (true);
+
+drop policy if exists "messages_participants_read" on public.messages;
+create policy "messages_participants_read" on public.messages
+  for select to authenticated using (true);
+
+drop policy if exists "community_posts_read" on public.community_posts;
+create policy "community_posts_read" on public.community_posts
+  for select to authenticated using (true);
