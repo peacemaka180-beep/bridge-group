@@ -6,6 +6,8 @@ Set production environment variables in your hosting dashboard. For local develo
 
 - `PORT=4000`
 - `DATABASE_URL=<Supabase Postgres connection string>`
+- `SUPABASE_URL=https://<project-ref>.supabase.co`
+- `SUPABASE_ANON_KEY=<Supabase publishable/anon key>`
 - `JWT_SECRET=<strong-random-secret>`
 - `CLIENT_URL=https://your-domain.com`
 - `CORS_ALLOWED_ORIGINS=https://your-domain.com`
@@ -34,6 +36,8 @@ Frontend variables:
 - Database: Supabase Postgres
 
 On Render, set `DATABASE_URL` in the backend service environment dashboard. Use Supabase **Database settings → Connection string → Postgres connection string**. Do not use the Supabase project API URL.
+
+The backend uses Supabase Auth. Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the same Render service from Supabase **Project Settings → API**. Configure the production site URL and redirect URLs in Supabase Auth before enabling email confirmation.
 
 ## Security checklist
 

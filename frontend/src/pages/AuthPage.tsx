@@ -31,6 +31,11 @@ function AuthPage({ onNavigate }: AuthPageProps) {
       const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       const data = await response.json()
       if (!response.ok) { throw new Error(data.message || 'Authentication failed.') }
+      if (!data.token) {
+        alert('Check your email to confirm your Supabase account, then sign in.')
+        setAuthMode('signin')
+        return
+      }
       localStorage.setItem('bg_token', data.token)
       localStorage.setItem('bg_user', JSON.stringify(data.user))
       localStorage.setItem('bg_first_time_investor', String(data.user.role === 'investor'))

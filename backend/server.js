@@ -1,19 +1,18 @@
 import 'dotenv/config'
+import 'express-async-errors'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
-import db, { seedFinancialLedger, seedInvestments, seedPayouts, seedProjects } from './db.js'
+import db from './db.js'
 import {
-  comparePassword,
-  ensureSeedUsers,
-  hashPassword,
   isStrongPassword,
   isValidEmail,
   requireAuth,
   requireRole,
-  revokeToken,
-  signToken,
+  signIn,
+  signOut,
+  signUp,
 } from './auth.js'
 
 const app = express()
@@ -112,24 +111,13 @@ app.use((req, res, next) => {
   next()
 })
 
-if (isDemoMode) {
-  await ensureSeedUsers()
-  await seedProjects()
-  await seedInvestments()
-  await seedFinancialLedger()
-  await seedPayouts()
-}
-
 app.get('/api/health', async (req, res) => {
   res.json({ status: 'ok', service: 'bridge-group-api' })
 })
 
 app.post('/api/auth/logout', requireAuth, async (req, res) => {
   const authHeader = req.headers.authorization
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    revokeToken(authHeader.split(' ')[1])
-  }
-
+  await signOut(authHeader.slice('Bearer '.length))
   res.json({ message: 'Logged out successfully.' })
 })
 
@@ -141,23 +129,23 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ message: 'Please provide a valid email and a password with at least 8 characters, including a number.' })
   }
 
-  const user = await db.prepare('SELECT * FROM users WHERE email = $1').get(normalizedEmail)
-  if (!user) {
+  let session
+  try {
+    session = await signIn(normalizedEmail, password)
+  } catch {
     return res.status(401).json({ message: 'Invalid credentials.' })
   }
 
-  const matches = comparePassword(password, user.password_hash)
-  if (!matches) {
-    return res.status(401).json({ message: 'Invalid credentials.' })
-  }
+  const user = await db.prepare('SELECT id, full_name, email, role, company, bio, avatar_url FROM users WHERE auth_user_id = $1').get(session.user.id)
+  if (!user) return res.status(403).json({ message: 'Account profile is not configured.' })
 
   if (role && user.role !== role) {
     return res.status(403).json({ message: `This account is not registered as a ${role}.` })
   }
 
-  const token = signToken(user)
   res.json({
-    token,
+    token: session.access_token,
+    refreshToken: session.refresh_token,
     user: {
       id: user.id,
       full_name: user.full_name,
@@ -179,29 +167,32 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ message: 'Full name, a valid email, and a strong password are required.' })
   }
 
-  const exists = await db.prepare('SELECT id FROM users WHERE email = $1').get(normalizedEmail)
-  if (exists) {
-    return res.status(409).json({ message: 'An account already exists with that email.' })
+  if (!['investor', 'innovator'].includes(role)) {
+    return res.status(400).json({ message: 'Choose either the investor or innovator role.' })
   }
 
-  const user = await db.prepare(`
-    INSERT INTO users (full_name, email, password_hash, role, company, bio, avatar_url)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
-  `).run(
-    full_name,
-    email.toLowerCase(),
-    hashPassword(password),
-    role,
-    company || '',
-    bio || '',
-    avatar_url || '',
-  )
+  let authResult
+  try {
+    authResult = await signUp({
+      email: normalizedEmail,
+      password,
+      metadata: { full_name: safeFullName, role },
+    })
+  } catch (error) {
+    return res.status(409).json({ message: error.message })
+  }
 
-  const createdUser = await db.prepare('SELECT * FROM users WHERE id = $1').get(user.lastInsertRowid)
-  const token = signToken(createdUser)
+  if (!authResult.user?.id) return res.status(400).json({ message: 'Unable to create Supabase account.' })
+
+  const createdUser = await db.prepare(`
+    INSERT INTO users (auth_user_id, full_name, email, role, company, bio, avatar_url)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    RETURNING id, full_name, email, role, company, bio, avatar_url
+  `).get(authResult.user.id, safeFullName, normalizedEmail, role, company || '', bio || '', avatar_url || '')
 
   res.status(201).json({
-    token,
+    token: authResult.session?.access_token ?? null,
+    refreshToken: authResult.session?.refresh_token ?? null,
     user: {
       id: createdUser.id,
       full_name: createdUser.full_name,

@@ -40,9 +40,10 @@ $$;
 
 create table if not exists public.users (
   id bigserial primary key,
+  auth_user_id uuid unique references auth.users(id) on delete cascade,
   full_name text not null,
   email text not null unique,
-  password_hash text not null,
+  password_hash text,
   role public.user_role not null,
   company text,
   bio text,
