@@ -2,9 +2,10 @@
 
 ## Required environment variables
 
-Create a production `.env` file with values appropriate for your host. At minimum:
+Set production environment variables in your hosting dashboard. For local development, use an untracked `.env` file. At minimum:
 
 - `PORT=4000`
+- `DATABASE_URL=<Supabase Postgres connection string>`
 - `JWT_SECRET=<strong-random-secret>`
 - `CLIENT_URL=https://your-domain.com`
 - `CORS_ALLOWED_ORIGINS=https://your-domain.com`
@@ -30,7 +31,9 @@ Frontend variables:
 
 - Frontend: Vercel, Netlify, or Cloudflare Pages
 - API: Railway, Render, Fly.io, or a VPS
-- Database: SQLite file on a persistent volume for low-traffic MVPs
+- Database: Supabase Postgres
+
+On Render, set `DATABASE_URL` in the backend service environment dashboard. Use Supabase **Database settings → Connection string → Postgres connection string**. Do not use the Supabase project API URL.
 
 ## Security checklist
 
@@ -39,4 +42,4 @@ Frontend variables:
 - Restrict CORS to your real public domain(s)
 - Run HTTPS only
 - Use a reverse proxy such as Nginx or managed hosting with TLS termination
-- Keep server logs and DB files outside the public web root
+- Keep server logs outside the public web root

@@ -113,18 +113,18 @@ app.use((req, res, next) => {
 })
 
 if (isDemoMode) {
-  ensureSeedUsers()
-  seedProjects()
-  seedInvestments()
-  seedFinancialLedger()
-  seedPayouts()
+  await ensureSeedUsers()
+  await seedProjects()
+  await seedInvestments()
+  await seedFinancialLedger()
+  await seedPayouts()
 }
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   res.json({ status: 'ok', service: 'bridge-group-api' })
 })
 
-app.post('/api/auth/logout', requireAuth, (req, res) => {
+app.post('/api/auth/logout', requireAuth, async (req, res) => {
   const authHeader = req.headers.authorization
   if (authHeader && authHeader.startsWith('Bearer ')) {
     revokeToken(authHeader.split(' ')[1])
@@ -133,7 +133,7 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
   res.json({ message: 'Logged out successfully.' })
 })
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { email, password, role } = req.body || {}
   const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
 
@@ -141,7 +141,7 @@ app.post('/api/auth/login', (req, res) => {
     return res.status(400).json({ message: 'Please provide a valid email and a password with at least 8 characters, including a number.' })
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail)
+  const user = await db.prepare('SELECT * FROM users WHERE email = $1').get(normalizedEmail)
   if (!user) {
     return res.status(401).json({ message: 'Invalid credentials.' })
   }
@@ -170,7 +170,7 @@ app.post('/api/auth/login', (req, res) => {
   })
 })
 
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const { full_name, email, password, role, company, bio, avatar_url } = req.body || {}
   const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
   const safeFullName = sanitizeText(full_name || '')
@@ -179,14 +179,14 @@ app.post('/api/auth/register', (req, res) => {
     return res.status(400).json({ message: 'Full name, a valid email, and a strong password are required.' })
   }
 
-  const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail)
+  const exists = await db.prepare('SELECT id FROM users WHERE email = $1').get(normalizedEmail)
   if (exists) {
     return res.status(409).json({ message: 'An account already exists with that email.' })
   }
 
-  const user = db.prepare(`
+  const user = await db.prepare(`
     INSERT INTO users (full_name, email, password_hash, role, company, bio, avatar_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
   `).run(
     full_name,
     email.toLowerCase(),
@@ -197,7 +197,7 @@ app.post('/api/auth/register', (req, res) => {
     avatar_url || '',
   )
 
-  const createdUser = db.prepare('SELECT * FROM users WHERE id = ?').get(user.lastInsertRowid)
+  const createdUser = await db.prepare('SELECT * FROM users WHERE id = $1').get(user.lastInsertRowid)
   const token = signToken(createdUser)
 
   res.status(201).json({
@@ -214,8 +214,8 @@ app.post('/api/auth/register', (req, res) => {
   })
 })
 
-app.get('/api/profile/me', requireAuth, (req, res) => {
-  const user = db.prepare('SELECT id, full_name, email, role, company, bio, avatar_url FROM users WHERE id = ?').get(req.user.id)
+app.get('/api/profile/me', requireAuth, async (req, res) => {
+  const user = await db.prepare('SELECT id, full_name, email, role, company, bio, avatar_url FROM users WHERE id = $1').get(req.user.id)
 
   if (!user) {
     return res.status(404).json({ message: 'User not found.' })
@@ -224,22 +224,22 @@ app.get('/api/profile/me', requireAuth, (req, res) => {
   res.json({ user })
 })
 
-app.get('/api/ideas', requireAuth, (req, res) => {
+app.get('/api/ideas', requireAuth, async (req, res) => {
   if (req.user.role === 'innovator') {
-    const ideas = db.prepare('SELECT * FROM idea_requests WHERE innovator_id = ? ORDER BY created_at DESC').all(req.user.id)
+    const ideas = await db.prepare('SELECT * FROM idea_requests WHERE innovator_id = $1 ORDER BY created_at DESC').all(req.user.id)
     return res.json({ ideas })
   }
 
   if (req.user.role === 'admin' || req.user.role === 'investor') {
-    const ideas = db.prepare('SELECT * FROM idea_requests ORDER BY created_at DESC').all()
+    const ideas = await db.prepare('SELECT * FROM idea_requests ORDER BY created_at DESC').all()
     return res.json({ ideas })
   }
 
   return res.status(403).json({ message: 'You do not have permission to view idea requests.' })
 })
 
-app.get('/api/ideas/:id', requireAuth, (req, res) => {
-  const idea = db.prepare('SELECT * FROM idea_requests WHERE id = ?').get(req.params.id)
+app.get('/api/ideas/:id', requireAuth, async (req, res) => {
+  const idea = await db.prepare('SELECT * FROM idea_requests WHERE id = $1').get(req.params.id)
 
   if (!idea) {
     return res.status(404).json({ message: 'Idea request not found.' })
@@ -252,18 +252,18 @@ app.get('/api/ideas/:id', requireAuth, (req, res) => {
   res.json({ idea })
 })
 
-app.post('/api/ideas', requireAuth, requireRole('innovator', 'admin'), (req, res) => {
+app.post('/api/ideas', requireAuth, requireRole('innovator', 'admin'), async (req, res) => {
   const { title, category, field, problem, solution, pitch, founder_name, email } = req.body || {}
 
   if (!title || !category || !field || !problem || !solution || !pitch || !founder_name || !email) {
     return res.status(400).json({ message: 'All idea request fields are required.' })
   }
 
-  const result = db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO idea_requests (
       innovator_id, title, category, field, problem, solution, pitch,
       founder_name, email, status, score, department, review_summary, admin_notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', 0, NULL, NULL, NULL, datetime('now'), datetime('now'))
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'submitted', 0, NULL, NULL, NULL, NOW(), NOW())
   `).run(
     req.user.id,
     title,
@@ -276,42 +276,42 @@ app.post('/api/ideas', requireAuth, requireRole('innovator', 'admin'), (req, res
     email,
   )
 
-  const idea = db.prepare('SELECT * FROM idea_requests WHERE id = ?').get(result.lastInsertRowid)
+  const idea = await db.prepare('SELECT * FROM idea_requests WHERE id = $1').get(result.lastInsertRowid)
   res.status(201).json({ idea })
 })
 
-app.patch('/api/ideas/:id/status', requireAuth, requireRole('admin'), (req, res) => {
+app.patch('/api/ideas/:id/status', requireAuth, requireRole('admin'), async (req, res) => {
   const { status, score, department, review_summary, admin_notes } = req.body || {}
-  const existing = db.prepare('SELECT * FROM idea_requests WHERE id = ?').get(req.params.id)
+  const existing = await db.prepare('SELECT * FROM idea_requests WHERE id = $1').get(req.params.id)
 
   if (!existing) {
     return res.status(404).json({ message: 'Idea request not found.' })
   }
 
-  const update = db.prepare(`
+  const update = await db.prepare(`
     UPDATE idea_requests
-    SET status = COALESCE(?, status),
-        score = COALESCE(?, score),
-        department = COALESCE(?, department),
-        review_summary = COALESCE(?, review_summary),
-        admin_notes = COALESCE(?, admin_notes),
-        updated_at = datetime('now')
-    WHERE id = ?
+    SET status = COALESCE($1, status),
+        score = COALESCE($2, score),
+        department = COALESCE($3, department),
+        review_summary = COALESCE($4, review_summary),
+        admin_notes = COALESCE($5, admin_notes),
+        updated_at = NOW()
+    WHERE id = $6
   `)
 
-  update.run(status ?? null, score ?? null, department ?? null, review_summary ?? null, admin_notes ?? null, req.params.id)
+  await update.run(status ?? null, score ?? null, department ?? null, review_summary ?? null, admin_notes ?? null, req.params.id)
 
-  const idea = db.prepare('SELECT * FROM idea_requests WHERE id = ?').get(req.params.id)
+  const idea = await db.prepare('SELECT * FROM idea_requests WHERE id = $1').get(req.params.id)
   res.json({ idea })
 })
 
-app.get('/api/projects', requireAuth, (req, res) => {
-  const projects = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all()
+app.get('/api/projects', requireAuth, async (req, res) => {
+  const projects = await db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all()
   res.json({ projects })
 })
 
-app.get('/api/monetization/summary', requireAuth, requireRole('admin', 'investor'), (req, res) => {
-  const projects = db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all()
+app.get('/api/monetization/summary', requireAuth, requireRole('admin', 'investor'), async (req, res) => {
+  const projects = await db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all()
   const approvedProjects = projects.filter((project) => project.status === 'live')
   const totalFundingGoal = projects.reduce((sum, project) => sum + Number(project.funding_goal || 0), 0)
   const totalRaised = projects.reduce((sum, project) => sum + Number(project.funding_raised || 0), 0)
@@ -337,7 +337,7 @@ app.get('/api/monetization/summary', requireAuth, requireRole('admin', 'investor
   })
 })
 
-app.post('/api/projects/approve', requireAuth, requireRole('admin'), (req, res) => {
+app.post('/api/projects/approve', requireAuth, requireRole('admin'), async (req, res) => {
   const {
     idea_id,
     title,
@@ -356,18 +356,18 @@ app.post('/api/projects/approve', requireAuth, requireRole('admin'), (req, res) 
     return res.status(400).json({ message: 'Project title, category, description, problem, solution, and funding goal are required.' })
   }
 
-  const idea = idea_id ? db.prepare('SELECT * FROM idea_requests WHERE id = ?').get(idea_id) : null
+  const idea = idea_id ? await db.prepare('SELECT * FROM idea_requests WHERE id = $1').get(idea_id) : null
   const creatorId = innovator_id || (idea ? idea.innovator_id : req.user.id)
 
-  const insert = db.prepare(`
+  const insert = await db.prepare(`
     INSERT INTO projects (
       title, category, description, problem, solution, stage, funding_goal,
       funding_raised, equity_offered, revenue_share_pct, status, image_url,
       innovator_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, 'approved', ?, 0, ?, ?, 'live', '', ?, datetime('now'), datetime('now'))
+    ) VALUES ($1, $2, $3, $4, $5, 'approved', $6, 0, $7, $8, 'live', '', $9, NOW(), NOW())
   `)
 
-  const result = insert.run(
+  const result = await insert.run(
     title,
     category,
     description,
@@ -379,13 +379,13 @@ app.post('/api/projects/approve', requireAuth, requireRole('admin'), (req, res) 
     creatorId,
   )
 
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(result.lastInsertRowid)
+  const project = await db.prepare('SELECT * FROM projects WHERE id = $1').get(result.lastInsertRowid)
 
   if (idea) {
-    db.prepare(`
+    await db.prepare(`
       UPDATE idea_requests
-      SET status = 'approved', score = COALESCE(score, 0) + 5, department = COALESCE(department, 'Product & Strategy'), updated_at = datetime('now')
-      WHERE id = ?
+      SET status = 'approved', score = COALESCE(score, 0) + 5, department = COALESCE(department, 'Product & Strategy'), updated_at = NOW()
+      WHERE id = $1
     `).run(idea.id)
   }
 
@@ -401,13 +401,13 @@ app.post('/api/projects/approve', requireAuth, requireRole('admin'), (req, res) 
   })
 })
 
-app.get('/api/finance/summary', requireAuth, (req, res) => {
-  const ledger = db.prepare('SELECT * FROM financial_ledger WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id)
+app.get('/api/finance/summary', requireAuth, async (req, res) => {
+  const ledger = await db.prepare('SELECT * FROM financial_ledger WHERE user_id = $1 ORDER BY created_at DESC').all(req.user.id)
   const inflow = ledger.filter((entry) => entry.direction === 'inflow').reduce((sum, entry) => sum + Number(entry.amount), 0)
   const outflow = ledger.filter((entry) => entry.direction === 'outflow').reduce((sum, entry) => sum + Number(entry.amount), 0)
   const net = inflow - outflow
 
-  const activeInvestments = db.prepare('SELECT COUNT(*) as count FROM investments WHERE investor_id = ?').get(req.user.id)?.count ?? 0
+  const activeInvestments = await db.prepare('SELECT COUNT(*)::int as count FROM investments WHERE investor_id = $1').get(req.user.id)?.count ?? 0
 
   res.json({
     totalInflow: inflow,
@@ -419,14 +419,14 @@ app.get('/api/finance/summary', requireAuth, (req, res) => {
   })
 })
 
-app.get('/api/finance/ledger', requireAuth, (req, res) => {
-  const ledger = db.prepare('SELECT * FROM financial_ledger WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id)
+app.get('/api/finance/ledger', requireAuth, async (req, res) => {
+  const ledger = await db.prepare('SELECT * FROM financial_ledger WHERE user_id = $1 ORDER BY created_at DESC').all(req.user.id)
   res.json({ ledger })
 })
 
-app.get('/api/admin/finance', requireAuth, requireRole('admin'), (req, res) => {
-  const ledger = db.prepare('SELECT * FROM financial_ledger ORDER BY created_at DESC').all()
-  const payouts = db.prepare('SELECT * FROM payouts ORDER BY created_at DESC').all()
+app.get('/api/admin/finance', requireAuth, requireRole('admin'), async (req, res) => {
+  const ledger = await db.prepare('SELECT * FROM financial_ledger ORDER BY created_at DESC').all()
+  const payouts = await db.prepare('SELECT * FROM payouts ORDER BY created_at DESC').all()
 
   const totalRevenue = ledger
     .filter((entry) => entry.direction === 'inflow')
@@ -452,57 +452,57 @@ app.get('/api/admin/finance', requireAuth, requireRole('admin'), (req, res) => {
   })
 })
 
-app.post('/api/finance/ledger', requireAuth, requireRole('investor', 'admin'), (req, res) => {
+app.post('/api/finance/ledger', requireAuth, requireRole('investor', 'admin'), async (req, res) => {
   const { project_id, category, direction, amount, description, status = 'posted' } = req.body || {}
 
   if (!category || !direction || !amount || !description) {
     return res.status(400).json({ message: 'Category, direction, amount, and description are required.' })
   }
 
-  const currentBalance = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM financial_ledger WHERE user_id = ?').get(req.user.id)?.total ?? 0
+  const currentBalance = await db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM financial_ledger WHERE user_id = $1').get(req.user.id)?.total ?? 0
   const numericAmount = Number(amount)
   const balanceAfter = direction === 'inflow' ? Number(currentBalance) + numericAmount : Number(currentBalance) - numericAmount
 
-  const result = db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO financial_ledger (user_id, project_id, category, direction, amount, balance_after, status, description, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
   `).run(req.user.id, project_id || null, category, direction, numericAmount, balanceAfter, status, description)
 
-  const entry = db.prepare('SELECT * FROM financial_ledger WHERE id = ?').get(result.lastInsertRowid)
+  const entry = await db.prepare('SELECT * FROM financial_ledger WHERE id = $1').get(result.lastInsertRowid)
   res.status(201).json({ entry })
 })
 
-app.get('/api/projects/:id', requireAuth, (req, res) => {
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id)
+app.get('/api/projects/:id', requireAuth, async (req, res) => {
+  const project = await db.prepare('SELECT * FROM projects WHERE id = $1').get(req.params.id)
   if (!project) {
     return res.status(404).json({ message: 'Project not found.' })
   }
 
-  const innovator = db.prepare('SELECT id, full_name, email, company, bio, avatar_url FROM users WHERE id = ?').get(project.innovator_id)
+  const innovator = await db.prepare('SELECT id, full_name, email, company, bio, avatar_url FROM users WHERE id = $1').get(project.innovator_id)
   res.json({ project: { ...project, innovator } })
 })
 
-app.post('/api/projects', requireAuth, requireRole('innovator', 'admin'), (req, res) => {
+app.post('/api/projects', requireAuth, requireRole('innovator', 'admin'), async (req, res) => {
   const { title, category, description, problem, solution, stage, funding_goal, equity_offered, revenue_share_pct, image_url } = req.body || {}
 
   if (!title || !category || !description || !problem || !solution || !stage || !funding_goal) {
     return res.status(400).json({ message: 'Missing required project fields.' })
   }
 
-  const user = db.prepare('SELECT id FROM users WHERE id = ?').get(req.user.id)
+  const user = await db.prepare('SELECT id FROM users WHERE id = $1').get(req.user.id)
   if (!user) {
     return res.status(404).json({ message: 'User not found.' })
   }
 
-  const insert = db.prepare(`
+  const insert = await db.prepare(`
     INSERT INTO projects (
       title, category, description, problem, solution, stage, funding_goal,
       funding_raised, equity_offered, revenue_share_pct, status, image_url, innovator_id,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 'live', ?, ?, datetime('now'), datetime('now'))
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, 'live', $10, $11, NOW(), NOW())
   `)
 
-  const result = insert.run(
+  const result = await insert.run(
     title,
     category,
     description,
@@ -516,57 +516,57 @@ app.post('/api/projects', requireAuth, requireRole('innovator', 'admin'), (req, 
     req.user.id,
   )
 
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(result.lastInsertRowid)
+  const project = await db.prepare('SELECT * FROM projects WHERE id = $1').get(result.lastInsertRowid)
   res.status(201).json({ project })
 })
 
-app.get('/api/investments', requireAuth, requireRole('investor', 'admin'), (req, res) => {
-  const investments = db.prepare(`
+app.get('/api/investments', requireAuth, requireRole('investor', 'admin'), async (req, res) => {
+  const investments = await db.prepare(`
     SELECT i.*, p.title AS project_title, p.image_url, p.category, p.funding_goal, p.funding_raised, p.revenue_share_pct
     FROM investments i
     LEFT JOIN projects p ON p.id = i.project_id
-    WHERE i.investor_id = ?
+    WHERE i.investor_id = $1
     ORDER BY i.created_at DESC
   `).all(req.user.id)
 
   res.json({ investments })
 })
 
-app.post('/api/investments', requireAuth, requireRole('investor', 'admin'), (req, res) => {
+app.post('/api/investments', requireAuth, requireRole('investor', 'admin'), async (req, res) => {
   const { project_id, amount, equity_pct } = req.body || {}
 
   if (!project_id || !amount) {
     return res.status(400).json({ message: 'Project and amount are required.' })
   }
 
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(project_id)
+  const project = await db.prepare('SELECT * FROM projects WHERE id = $1').get(project_id)
   if (!project) {
     return res.status(404).json({ message: 'Project not found.' })
   }
 
-  const result = db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO investments (investor_id, project_id, amount, equity_pct, status, created_at)
-    VALUES (?, ?, ?, ?, 'active', datetime('now'))
+    VALUES ($1, $2, $3, $4, 'active', NOW())
   `).run(req.user.id, project_id, Number(amount), Number(equity_pct || 0))
 
-  const investment = db.prepare('SELECT * FROM investments WHERE id = ?').get(result.lastInsertRowid)
+  const investment = await db.prepare('SELECT * FROM investments WHERE id = $1').get(result.lastInsertRowid)
   res.status(201).json({ investment })
 })
 
-app.get('/api/messages', requireAuth, (req, res) => {
-  const messages = db.prepare(`
+app.get('/api/messages', requireAuth, async (req, res) => {
+  const messages = await db.prepare(`
     SELECT m.*, s.full_name AS sender_name, s.avatar_url AS sender_avatar, r.full_name AS receiver_name, r.avatar_url AS receiver_avatar
     FROM messages m
     LEFT JOIN users s ON s.id = m.sender_id
     LEFT JOIN users r ON r.id = m.receiver_id
-    WHERE m.sender_id = ? OR m.receiver_id = ?
+    WHERE m.sender_id = $1 OR m.receiver_id = $2
     ORDER BY m.created_at DESC
   `).all(req.user.id, req.user.id)
 
   res.json({ messages })
 })
 
-app.post('/api/messages', requireAuth, (req, res) => {
+app.post('/api/messages', requireAuth, async (req, res) => {
   const { receiver_id, project_id, content } = req.body || {}
   const safeContent = typeof content === 'string' ? content.trim() : ''
 
@@ -574,7 +574,7 @@ app.post('/api/messages', requireAuth, (req, res) => {
     return res.status(400).json({ message: 'Receiver and message content are required.' })
   }
 
-  const receiver = db.prepare('SELECT id FROM users WHERE id = ?').get(receiver_id)
+  const receiver = await db.prepare('SELECT id FROM users WHERE id = $1').get(receiver_id)
   if (!receiver) {
     return res.status(404).json({ message: 'Recipient not found.' })
   }
@@ -583,29 +583,29 @@ app.post('/api/messages', requireAuth, (req, res) => {
     return res.status(400).json({ message: 'You cannot message yourself.' })
   }
 
-  const result = db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO messages (sender_id, receiver_id, project_id, content, created_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
+    VALUES ($1, $2, $3, $4, NOW())
   `).run(req.user.id, receiver_id, project_id || null, safeContent)
 
-  const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(result.lastInsertRowid)
+  const message = await db.prepare('SELECT * FROM messages WHERE id = $1').get(result.lastInsertRowid)
   res.status(201).json({ message })
 })
 
-app.get('/api/community/posts', requireAuth, (req, res) => {
+app.get('/api/community/posts', requireAuth, async (req, res) => {
   const categoryFilter = typeof req.query.category === 'string' ? req.query.category.trim() : ''
-  const posts = db.prepare(`
+  const posts = await db.prepare(`
     SELECT cp.*, u.full_name AS author_name, u.role AS author_role, u.avatar_url AS author_avatar
     FROM community_posts cp
     LEFT JOIN users u ON u.id = cp.author_id
-    WHERE (? = '' OR cp.category = ?)
+    WHERE ($1 = '' OR cp.category = $2)
     ORDER BY cp.created_at DESC
   `).all(categoryFilter, categoryFilter)
 
   res.json({ posts })
 })
 
-app.post('/api/community/posts', requireAuth, (req, res) => {
+app.post('/api/community/posts', requireAuth, async (req, res) => {
   const { category, title, content } = req.body || {}
   const safeTitle = typeof title === 'string' ? title.trim() : ''
   const safeContent = typeof content === 'string' ? content.trim() : ''
@@ -614,31 +614,31 @@ app.post('/api/community/posts', requireAuth, (req, res) => {
     return res.status(400).json({ message: 'Category, title, and content are required.' })
   }
 
-  const user = db.prepare('SELECT id, full_name, role FROM users WHERE id = ?').get(req.user.id)
+  const user = await db.prepare('SELECT id, full_name, role FROM users WHERE id = $1').get(req.user.id)
   if (!user) {
     return res.status(404).json({ message: 'User not found.' })
   }
 
-  const result = db.prepare(`
+  const result = await db.prepare(`
     INSERT INTO community_posts (category, author_id, author_name, author_role, title, content, replies, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, 0, datetime('now'))
+    VALUES ($1, $2, $3, $4, $5, $6, 0, NOW())
   `).run(category, user.id, user.full_name, user.role, safeTitle, safeContent)
 
-  const post = db.prepare('SELECT * FROM community_posts WHERE id = ?').get(result.lastInsertRowid)
+  const post = await db.prepare('SELECT * FROM community_posts WHERE id = $1').get(result.lastInsertRowid)
   res.status(201).json({ post })
 })
 
-app.get('/api/portfolio/summary', requireAuth, requireRole('investor', 'admin'), (req, res) => {
-  const investments = db.prepare(`
+app.get('/api/portfolio/summary', requireAuth, requireRole('investor', 'admin'), async (req, res) => {
+  const investments = await db.prepare(`
     SELECT i.*, p.title AS project_title, p.funding_goal, p.funding_raised, p.revenue_share_pct, p.image_url
     FROM investments i
     LEFT JOIN projects p ON p.id = i.project_id
-    WHERE i.investor_id = ?
+    WHERE i.investor_id = $1
   `).all(req.user.id)
 
   const totalInvested = investments.reduce((sum, item) => sum + Number(item.amount || 0), 0)
   const totalEquity = investments.reduce((sum, item) => sum + (Number(item.amount || 0) * Number(item.equity_pct || 0) / 100), 0)
-  const ledger = db.prepare('SELECT * FROM financial_ledger WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id)
+  const ledger = await db.prepare('SELECT * FROM financial_ledger WHERE user_id = $1 ORDER BY created_at DESC').all(req.user.id)
   const inflow = ledger.filter((entry) => entry.direction === 'inflow').reduce((sum, entry) => sum + Number(entry.amount), 0)
   const outflow = ledger.filter((entry) => entry.direction === 'outflow').reduce((sum, entry) => sum + Number(entry.amount), 0)
 
