@@ -1,6 +1,7 @@
 import { ArrowRight, BriefcaseBusiness, CheckCircle2, MessageSquareText, Sparkles, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AppNavigationHandler } from '../App'
+import { API_BASE_URL } from '../config'
 
 type DepartmentReviewPageProps = {
   onNavigate: AppNavigationHandler
@@ -49,7 +50,7 @@ function DepartmentReviewPage({ onNavigate, ideaId }: DepartmentReviewPageProps)
   useEffect(() => {
     const fetchIdea = async () => {
       const token = localStorage.getItem('bg_token')
-      const response = await fetch(`http://localhost:4000/api/ideas/${ideaId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/ideas/${ideaId}`, {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
@@ -73,7 +74,7 @@ function DepartmentReviewPage({ onNavigate, ideaId }: DepartmentReviewPageProps)
     }
 
     setIsUpdating(true)
-    const response = await fetch(`http://localhost:4000/api/ideas/${idea.id}/status`, {
+    const response = await fetch(`${API_BASE_URL}/api/ideas/${idea.id}/status`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',

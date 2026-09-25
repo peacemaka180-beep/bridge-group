@@ -2,6 +2,7 @@ import { CheckCircle2, MessageSquareText, ShieldCheck } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AppNavigationHandler } from '../App'
 import DashboardLayout from '../components/DashboardLayout'
+import { API_BASE_URL } from '../config'
 
 type AdminReviewPageProps = {
   onNavigate: AppNavigationHandler
@@ -25,7 +26,7 @@ function AdminReviewPage({ onNavigate }: AdminReviewPageProps) {
 
   const refreshIdeas = async () => {
     const token = localStorage.getItem('bg_token')
-    const response = await fetch('http://localhost:4000/api/ideas', {
+    const response = await fetch(`${API_BASE_URL}/api/ideas`, {
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
@@ -45,7 +46,7 @@ function AdminReviewPage({ onNavigate }: AdminReviewPageProps) {
 
   const handleMarkPotential = async (id: number) => {
     const token = localStorage.getItem('bg_token')
-    const response = await fetch(`http://localhost:4000/api/ideas/${id}/status`, {
+    const response = await fetch(`${API_BASE_URL}/api/ideas/${id}/status`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',

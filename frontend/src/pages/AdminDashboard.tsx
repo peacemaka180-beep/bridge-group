@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import DashboardLayout from '../components/DashboardLayout'
 import StatCard from '../components/ui/StatCard'
 import type { AppNavigationHandler } from '../App'
+import { API_BASE_URL } from '../config'
 
 type AdminDashboardProps = {
   onNavigate: AppNavigationHandler
@@ -51,7 +52,7 @@ function AdminDashboard({ onNavigate }: AdminDashboardProps) {
       }
 
       try {
-        const response = await fetch('http://localhost:4000/api/admin/finance', {
+        const response = await fetch(`${API_BASE_URL}/api/admin/finance`, {
           headers: {
             Authorization: `Bearer ${token}`,
           },

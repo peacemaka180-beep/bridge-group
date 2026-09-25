@@ -1,6 +1,7 @@
 import { ArrowRight, BadgeCheck, Building2, CircleDollarSign, TrendingUp } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AppNavigationHandler } from '../App'
+import { API_BASE_URL } from '../config'
 
 type ProjectApprovalPageProps = {
   onNavigate: AppNavigationHandler
@@ -39,7 +40,7 @@ function ProjectApprovalPage({ onNavigate, ideaId }: ProjectApprovalPageProps) {
   useEffect(() => {
     const fetchIdea = async () => {
       const token = localStorage.getItem('bg_token')
-      const response = await fetch(`http://localhost:4000/api/ideas/${ideaId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/ideas/${ideaId}`, {
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       })
 
@@ -77,7 +78,7 @@ function ProjectApprovalPage({ onNavigate, ideaId }: ProjectApprovalPageProps) {
     setSubmitting(true)
 
     try {
-      const response = await fetch('http://localhost:4000/api/projects/approve', {
+      const response = await fetch(`${API_BASE_URL}/api/projects/approve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
