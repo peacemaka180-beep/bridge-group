@@ -9,7 +9,13 @@ Set production environment variables in your hosting dashboard. For local develo
 - `SUPABASE_URL=https://<project-ref>.supabase.co`
 - `SUPABASE_ANON_KEY=<Supabase publishable/anon key>`
 - `JWT_SECRET=<strong-random-secret>`
+- `BOOTSTRAP_ADMIN_KEY=<random-secret-at-least-32-characters>`
 - `CLIENT_URL=https://your-domain.com`
+- `SMTP_HOST=<your-email-provider-host>`
+- `SMTP_PORT=587`
+- `SMTP_USER=<your-email-provider-user>`
+- `SMTP_PASSWORD=<your-email-provider-password>`
+- `EMAIL_FROM=<verified-sender-address>`
 - `CORS_ALLOWED_ORIGINS=https://your-domain.com`
 - `NODE_ENV=production`
 - `ENABLE_DEMO_DATA=false`
@@ -38,6 +44,10 @@ Frontend variables:
 On Render, set `DATABASE_URL` in the backend service environment dashboard. Use Supabase **Database settings → Connection string → Postgres connection string**. Do not use the Supabase project API URL.
 
 The backend uses Supabase Auth. Add `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the same Render service from Supabase **Project Settings → API**. Configure the production site URL and redirect URLs in Supabase Auth before enabling email confirmation.
+
+Password reset links are delivered by SMTP. Configure the mail variables above with a verified sender address in your hosting dashboard; reset requests return a setup error until SMTP is configured. Links expire after 30 minutes and can only be used once.
+
+For a fresh database, set `BOOTSTRAP_ADMIN_KEY` to a secret of at least 32 characters and make one `POST /api/auth/bootstrap-admin` request with the `x-bootstrap-admin-key` header and JSON `{ "full_name", "email", "password" }`. This endpoint is rate-limited and permanently closes as soon as an admin account is created. Remove or rotate the bootstrap key afterward.
 
 ## Security checklist
 

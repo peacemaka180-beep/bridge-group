@@ -4,6 +4,7 @@ import DashboardLayout from '../components/DashboardLayout'
 import StatCard from '../components/ui/StatCard'
 import type { AppNavigationHandler } from '../App'
 import { API_BASE_URL } from '../config'
+import { clearSession, getToken } from '../lib/auth'
 
 type AdminDashboardProps = {
   onNavigate: AppNavigationHandler
@@ -38,15 +39,25 @@ type FinanceSummary = {
   }>
 }
 
+const csvCell = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`
+
 function AdminDashboard({ onNavigate }: AdminDashboardProps) {
   const [summary, setSummary] = useState<FinanceSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState('')
+  const [notice, setNotice] = useState('')
+
+  const showNotice = (text: string) => {
+    setNotice(text)
+    window.setTimeout(() => setNotice(''), 3000)
+  }
 
   useEffect(() => {
     const fetchSummary = async () => {
-      const token = localStorage.getItem('bg_token')
+      const token = getToken()
 
       if (!token) {
+        setMessage('Please sign in as the admin to view finance data.')
         setLoading(false)
         return
       }
@@ -58,6 +69,17 @@ function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           },
         })
 
+        if (response.status === 401) {
+          clearSession()
+          onNavigate('auth')
+          return
+        }
+
+        if (response.status === 403) {
+          setMessage('This page is only for admin accounts.')
+          return
+        }
+
         if (!response.ok) {
           throw new Error('Failed to load finance summary')
         }
@@ -66,12 +88,14 @@ function AdminDashboard({ onNavigate }: AdminDashboardProps) {
         setSummary(data)
       } catch (error) {
         console.error(error)
+        setMessage('Could not load the finance summary. Check that the backend is running.')
       } finally {
         setLoading(false)
       }
     }
 
     fetchSummary()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const payroll = useMemo(() => {
@@ -87,6 +111,28 @@ function AdminDashboard({ onNavigate }: AdminDashboardProps) {
     }
   }, [summary])
 
+  const exportReport = () => {
+    if (!summary || summary.ledger.length === 0) {
+      showNotice('There are no ledger entries to export yet.')
+      return
+    }
+
+    const header = ['id', 'user_id', 'category', 'direction', 'amount', 'balance_after', 'status', 'description', 'created_at']
+    const rows = summary.ledger.map((e) => [e.id, e.user_id, e.category, e.direction, e.amount, e.balance_after, e.status, e.description, e.created_at])
+    const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n')
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'platform-ledger.csv'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    showNotice('Report exported.')
+  }
+
   return (
     <DashboardLayout
       title="Admin finance"
@@ -101,7 +147,14 @@ function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           </div>
         ) : !summary ? (
           <div className="rounded-[28px] border border-slate-200 bg-white p-10 text-center text-slate-600">
-            Please sign in as the admin to view finance data.
+            <p>{message || 'Could not load the finance summary.'}</p>
+            <button
+              type="button"
+              className="mt-4 rounded-full bg-[#f97316] px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600"
+              onClick={() => onNavigate('auth')}
+            >
+              Go to sign in
+            </button>
           </div>
         ) : (
           <>
@@ -119,7 +172,11 @@ function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                     <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Finance summary</p>
                     <h3 className="mt-2 text-xl font-extrabold text-slate-900">Cashflow overview</h3>
                   </div>
-                  <button className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-orange-200"
+                    onClick={exportReport}
+                  >
                     Export report
                     <Download className="h-3.5 w-3.5" />
                   </button>
@@ -199,6 +256,11 @@ function AdminDashboard({ onNavigate }: AdminDashboardProps) {
                 </div>
 
                 <div className="space-y-3">
+                  {summary.ledger.length === 0 && (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-center text-sm text-slate-600">
+                      No financial movements have been recorded yet.
+                    </div>
+                  )}
                   {summary.ledger.slice(0, 8).map((entry) => (
                     <div key={entry.id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-3">
                       <div>
@@ -208,7 +270,7 @@ function AdminDashboard({ onNavigate }: AdminDashboardProps) {
 
                       <div className="text-right">
                         <p className={`font-bold ${entry.direction === 'inflow' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {entry.direction === 'inflow' ? '+' : '-'}${entry.amount.toLocaleString()}
+                          {entry.direction === 'inflow' ? '+' : '-'}${Number(entry.amount).toLocaleString()}
                         </p>
                         <p className="text-xs uppercase tracking-[0.12em] text-slate-500">{entry.direction}</p>
                       </div>
@@ -251,6 +313,12 @@ function AdminDashboard({ onNavigate }: AdminDashboardProps) {
           </>
         )}
       </div>
+
+      {notice && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-sm rounded-full bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg">
+          {notice}
+        </div>
+      )}
     </DashboardLayout>
   )
 }

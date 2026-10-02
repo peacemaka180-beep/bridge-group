@@ -1,26 +1,55 @@
 import 'dotenv/config'
 import 'express-async-errors'
+import crypto from 'node:crypto'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
-import db from './db.js'
+import nodemailer from 'nodemailer'
+import db, { pool } from './db.js'
 import {
+  createToken,
+  hashPassword,
   isStrongPassword,
   isValidEmail,
   requireAuth,
   requireRole,
-  signIn,
-  signOut,
-  signUp,
+  verifyPassword,
 } from './auth.js'
+import featuresRouter from './features.js' // ADDED: calls, replies, guidance, invest
 
 const app = express()
 const PORT = Number(process.env.PORT || 4000)
 const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:5173').split(',').map((origin) => origin.trim()).filter(Boolean)
 const isDemoMode = process.env.ENABLE_DEMO_DATA === 'true'
+const smtpPort = Number(process.env.SMTP_PORT || 587)
+const mailer = process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD && process.env.EMAIL_FROM
+  ? nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+    })
+  : null
+
+await db.query(`
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+`)
 
 app.set('trust proxy', 1)
+
+// Preview-hosting wildcards (Vercel/Netlify/GitHub Codespaces/ngrok previews)
+// are only trusted when ALLOW_PREVIEW_ORIGINS=true. Anyone can deploy a free
+// app on these platforms, so trusting the whole domain by default would let
+// any such app make credentialed cross-origin requests to this API. Turn
+// this on temporarily in .env only while you're testing a preview deploy.
+const allowPreviewOrigins = process.env.ALLOW_PREVIEW_ORIGINS === 'true'
 
 const isAllowedOrigin = (origin) => {
   if (!origin) return true
@@ -34,7 +63,15 @@ const isAllowedOrigin = (origin) => {
     if (['localhost', '127.0.0.1', 'bridgegroup.local'].includes(hostname)) {
       return ((port >= 3000 && port <= 3999) || (port >= 5173 && port <= 5199) || port === 80)
     }
-    return hostname.endsWith('.vercel.app') || hostname.endsWith('.netlify.app') || hostname.endsWith('.github.dev') || hostname.endsWith('.pages.dev')
+    if (!allowPreviewOrigins) return false
+    return hostname.endsWith('.vercel.app')
+      || hostname.endsWith('.netlify.app')
+      || hostname.endsWith('.github.dev')
+      || hostname.endsWith('.pages.dev')
+      || hostname.endsWith('.ngrok-free.dev')
+      || hostname.endsWith('.ngrok-free.app')
+      || hostname.endsWith('.ngrok.io')
+      || hostname.endsWith('.ngrok.app')
   } catch {
     return false
   }
@@ -48,7 +85,7 @@ app.use(helmet({
       imgSrc: ["'self'", 'https:', 'data:'],
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      connectSrc: ["'self'", 'http://localhost:4000', 'http://localhost:3000'],
+      connectSrc: ["'self'", 'http://localhost:4000', 'http://localhost:3000', ...allowedOrigins],
     },
   },
   crossOriginResourcePolicy: { policy: 'same-origin' },
@@ -69,10 +106,14 @@ const sanitizeText = (value) => {
   return value.replace(/[<>]/g, '').trim()
 }
 
+// Passwords are never altered: stripping characters would change what the user typed.
+const UNSANITIZED_FIELDS = new Set(['password'])
+
 const sanitizeBody = (body) => {
   if (!body || typeof body !== 'object') return body
 
   for (const key of Object.keys(body)) {
+    if (UNSANITIZED_FIELDS.has(key)) continue
     if (typeof body[key] === 'string') {
       body[key] = sanitizeText(body[key])
     } else if (Array.isArray(body[key])) {
@@ -100,7 +141,10 @@ const authLimiter = rateLimit({
   message: { message: 'Too many authentication attempts. Please try again later.' },
 })
 
-app.use('/api/auth', authLimiter)
+app.use('/api/auth/login', authLimiter)
+app.use('/api/auth/register', authLimiter)
+app.use('/api/auth/password-reset', authLimiter)
+app.use('/api/auth/bootstrap-admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false }))
 
 app.use((req, res, next) => {
   res.on('finish', () => {
@@ -112,12 +156,12 @@ app.use((req, res, next) => {
 })
 
 app.get('/api/health', async (req, res) => {
-  res.json({ status: 'ok', service: 'bridge-group-api' })
+  await db.query('SELECT 1')
+  res.json({ status: 'ok', service: 'bridge-group-api', database: 'bridge_groups' })
 })
 
+// Sessions are stateless JWTs, so logging out simply means the client discards its token.
 app.post('/api/auth/logout', requireAuth, async (req, res) => {
-  const authHeader = req.headers.authorization
-  await signOut(authHeader.slice('Bearer '.length))
   res.json({ message: 'Logged out successfully.' })
 })
 
@@ -125,27 +169,28 @@ app.post('/api/auth/login', async (req, res) => {
   const { email, password, role } = req.body || {}
   const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
 
-  if (!normalizedEmail || !password || !isValidEmail(normalizedEmail) || !isStrongPassword(password)) {
-    return res.status(400).json({ message: 'Please provide a valid email and a password with at least 8 characters, including a number.' })
+  if (!normalizedEmail || typeof password !== 'string' || !password || !isValidEmail(normalizedEmail)) {
+    return res.status(400).json({ message: 'Please provide a valid email and password.' })
   }
 
-  let session
-  try {
-    session = await signIn(normalizedEmail, password)
-  } catch {
+  const user = await db.prepare(
+    'SELECT id, full_name, email, password_hash, role, company, bio, avatar_url FROM users WHERE lower(email) = $1',
+  ).get(normalizedEmail)
+
+  // Deliberately the same message whether the account doesn't exist or the
+  // password is wrong. Telling the two apart lets an attacker enumerate
+  // which email addresses have accounts on this platform.
+  if (!user || !(await verifyPassword(password, user.password_hash))) {
     return res.status(401).json({ message: 'Invalid credentials.' })
   }
-
-  const user = await db.prepare('SELECT id, full_name, email, role, company, bio, avatar_url FROM users WHERE auth_user_id = $1').get(session.user.id)
-  if (!user) return res.status(403).json({ message: 'Account profile is not configured.' })
 
   if (role && user.role !== role) {
     return res.status(403).json({ message: `This account is not registered as a ${role}.` })
   }
 
   res.json({
-    token: session.access_token,
-    refreshToken: session.refresh_token,
+    token: createToken(user),
+    refreshToken: null,
     user: {
       id: user.id,
       full_name: user.full_name,
@@ -171,28 +216,27 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ message: 'Choose either the investor or innovator role.' })
   }
 
-  let authResult
-  try {
-    authResult = await signUp({
-      email: normalizedEmail,
-      password,
-      metadata: { full_name: safeFullName, role },
-    })
-  } catch (error) {
-    return res.status(409).json({ message: error.message })
+  const existing = await db.prepare('SELECT id FROM users WHERE lower(email) = $1').get(normalizedEmail)
+  if (existing) {
+    return res.status(409).json({ message: 'An account with this email already exists.' })
   }
 
-  if (!authResult.user?.id) return res.status(400).json({ message: 'Unable to create Supabase account.' })
+  const passwordHash = await hashPassword(password)
 
   const createdUser = await db.prepare(`
-    INSERT INTO users (auth_user_id, full_name, email, role, company, bio, avatar_url)
+    INSERT INTO users (full_name, email, password_hash, role, company, bio, avatar_url)
     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    ON CONFLICT DO NOTHING
     RETURNING id, full_name, email, role, company, bio, avatar_url
-  `).get(authResult.user.id, safeFullName, normalizedEmail, role, company || '', bio || '', avatar_url || '')
+  `).get(safeFullName, normalizedEmail, passwordHash, role, company || '', bio || '', avatar_url || '')
+
+  if (!createdUser) {
+    return res.status(409).json({ message: 'An account with this email already exists.' })
+  }
 
   res.status(201).json({
-    token: authResult.session?.access_token ?? null,
-    refreshToken: authResult.session?.refresh_token ?? null,
+    token: createToken(createdUser),
+    refreshToken: null,
     user: {
       id: createdUser.id,
       full_name: createdUser.full_name,
@@ -203,6 +247,143 @@ app.post('/api/auth/register', async (req, res) => {
       avatar_url: createdUser.avatar_url,
     },
   })
+})
+
+app.post('/api/auth/bootstrap-admin', async (req, res) => {
+  const configuredKey = process.env.BOOTSTRAP_ADMIN_KEY
+  const suppliedKey = req.get('x-bootstrap-admin-key')
+  if (!configuredKey || configuredKey.length < 32) {
+    return res.status(503).json({ message: 'Admin setup is not configured. Set a random BOOTSTRAP_ADMIN_KEY of at least 32 characters.' })
+  }
+  const suppliedKeyBytes = Buffer.from(typeof suppliedKey === 'string' ? suppliedKey : '')
+  const configuredKeyBytes = Buffer.from(configuredKey)
+  if (suppliedKeyBytes.length !== configuredKeyBytes.length
+    || !crypto.timingSafeEqual(suppliedKeyBytes, configuredKeyBytes)) {
+    return res.status(401).json({ message: 'Admin setup key is invalid.' })
+  }
+
+  const { full_name, email, password } = req.body || {}
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : ''
+  const safeFullName = sanitizeText(full_name || '')
+  if (!safeFullName || !isValidEmail(normalizedEmail) || !isStrongPassword(password)) {
+    return res.status(400).json({ message: 'Provide a name, valid email, and password with at least 8 characters, a letter, and a number.' })
+  }
+
+  const passwordHash = await hashPassword(password)
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query("SELECT pg_advisory_xact_lock(hashtext('bridge-group-admin-bootstrap'))")
+    const existingAdmin = await client.query("SELECT id FROM users WHERE role = 'admin' LIMIT 1")
+    if (existingAdmin.rowCount) {
+      await client.query('ROLLBACK')
+      return res.status(409).json({ message: 'An admin account already exists. Admin setup is closed.' })
+    }
+
+    const existingAccount = await client.query('SELECT id FROM users WHERE lower(email) = $1 FOR UPDATE', [normalizedEmail])
+    let user
+    if (existingAccount.rowCount) {
+      const promoted = await client.query(`
+        UPDATE users
+        SET full_name = $1, password_hash = $2, role = 'admin'
+        WHERE id = $3
+        RETURNING id, full_name, email, role, company, bio, avatar_url
+      `, [safeFullName, passwordHash, existingAccount.rows[0].id])
+      user = promoted.rows[0]
+    } else {
+      const created = await client.query(`
+        INSERT INTO users (full_name, email, password_hash, role, company, bio, avatar_url)
+        VALUES ($1, $2, $3, 'admin', '', '', '')
+        ON CONFLICT DO NOTHING
+        RETURNING id, full_name, email, role, company, bio, avatar_url
+      `, [safeFullName, normalizedEmail, passwordHash])
+      if (!created.rowCount) {
+        await client.query('ROLLBACK')
+        return res.status(409).json({ message: 'An account with this email already exists.' })
+      }
+      user = created.rows[0]
+    }
+
+    await client.query('COMMIT')
+    return res.status(201).json({ token: createToken(user), refreshToken: null, user })
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw error
+  } finally {
+    client.release()
+  }
+})
+
+app.post('/api/auth/password-reset/request', async (req, res) => {
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ message: 'Please provide a valid email address.' })
+  }
+  if (!mailer) {
+    return res.status(503).json({ message: 'Password reset email is not configured. Contact the administrator.' })
+  }
+
+  const user = await db.prepare('SELECT id FROM users WHERE lower(email) = $1').get(email)
+  if (user) {
+    const token = crypto.randomBytes(32).toString('base64url')
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+    await db.prepare('DELETE FROM password_reset_tokens WHERE user_id = $1 AND used_at IS NULL').run(user.id)
+    await db.prepare(`
+      INSERT INTO password_reset_tokens (token_hash, user_id, expires_at)
+      VALUES ($1, $2, NOW() + INTERVAL '30 minutes')
+    `).run(tokenHash, user.id)
+
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000'
+    const resetUrl = new URL(`/#/auth/reset/${token}`, clientUrl).toString()
+    try {
+      await mailer.sendMail({
+        from: process.env.EMAIL_FROM,
+        to: email,
+        subject: 'Reset your Bridge Group password',
+        text: `Use this link to reset your password. It expires in 30 minutes:\n\n${resetUrl}`,
+        html: `<p>Use the link below to reset your Bridge Group password. It expires in 30 minutes.</p><p><a href="${resetUrl}">Reset password</a></p>`,
+      })
+    } catch (error) {
+      await db.prepare('DELETE FROM password_reset_tokens WHERE token_hash = $1').run(tokenHash)
+      console.error('[auth] Password reset email could not be sent:', error.message)
+      return res.status(503).json({ message: 'Password reset email could not be sent. Try again later.' })
+    }
+  }
+
+  res.json({ message: 'If an account exists for that email, a password reset link has been sent.' })
+})
+
+app.post('/api/auth/password-reset/confirm', async (req, res) => {
+  const { token, password } = req.body || {}
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token) || !isStrongPassword(password)) {
+    return res.status(400).json({ message: 'Use a valid reset link and a password with at least 8 characters, a letter, and a number.' })
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const reset = await client.query(
+      'SELECT user_id FROM password_reset_tokens WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW() FOR UPDATE',
+      [tokenHash],
+    )
+    if (!reset.rowCount) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ message: 'This reset link is invalid or expired. Request a new one.' })
+    }
+
+    const passwordHash = await hashPassword(password)
+    await client.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, reset.rows[0].user_id])
+    await client.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = $1', [tokenHash])
+    await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1 AND token_hash <> $2', [reset.rows[0].user_id, tokenHash])
+    await client.query('COMMIT')
+    res.json({ message: 'Password reset successfully. You can now sign in.' })
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw error
+  } finally {
+    client.release()
+  }
 })
 
 app.get('/api/profile/me', requireAuth, async (req, res) => {
@@ -236,7 +417,7 @@ app.get('/api/ideas/:id', requireAuth, async (req, res) => {
     return res.status(404).json({ message: 'Idea request not found.' })
   }
 
-  if (req.user.role !== 'admin' && req.user.role !== 'investor' && idea.innovator_id !== req.user.id) {
+  if (req.user.role !== 'admin' && req.user.role !== 'investor' && Number(idea.innovator_id) !== Number(req.user.id)) {
     return res.status(403).json({ message: 'You do not have access to this idea request.' })
   }
 
@@ -350,6 +531,11 @@ app.post('/api/projects/approve', requireAuth, requireRole('admin'), async (req,
   const idea = idea_id ? await db.prepare('SELECT * FROM idea_requests WHERE id = $1').get(idea_id) : null
   const creatorId = innovator_id || (idea ? idea.innovator_id : req.user.id)
 
+  const creator = await db.prepare('SELECT id FROM users WHERE id = $1').get(creatorId)
+  if (!creator) {
+    return res.status(400).json({ message: 'Referenced record does not exist (innovator not found).' })
+  }
+
   const insert = await db.prepare(`
     INSERT INTO projects (
       title, category, description, problem, solution, stage, funding_goal,
@@ -398,7 +584,8 @@ app.get('/api/finance/summary', requireAuth, async (req, res) => {
   const outflow = ledger.filter((entry) => entry.direction === 'outflow').reduce((sum, entry) => sum + Number(entry.amount), 0)
   const net = inflow - outflow
 
-  const activeInvestments = await db.prepare('SELECT COUNT(*)::int as count FROM investments WHERE investor_id = $1').get(req.user.id)?.count ?? 0
+  const investmentCount = await db.prepare('SELECT COUNT(*)::int AS count FROM investments WHERE investor_id = $1').get(req.user.id)
+  const activeInvestments = investmentCount?.count ?? 0
 
   res.json({
     totalInflow: inflow,
@@ -450,9 +637,18 @@ app.post('/api/finance/ledger', requireAuth, requireRole('investor', 'admin'), a
     return res.status(400).json({ message: 'Category, direction, amount, and description are required.' })
   }
 
-  const currentBalance = await db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM financial_ledger WHERE user_id = $1').get(req.user.id)?.total ?? 0
+  if (!['inflow', 'outflow'].includes(direction)) {
+    return res.status(400).json({ message: 'Direction must be either inflow or outflow.' })
+  }
+
+  const balanceRow = await db.prepare(`
+    SELECT COALESCE(SUM(CASE WHEN direction = 'inflow' THEN amount ELSE -amount END), 0) AS total
+    FROM financial_ledger
+    WHERE user_id = $1
+  `).get(req.user.id)
+  const currentBalance = Number(balanceRow?.total ?? 0)
   const numericAmount = Number(amount)
-  const balanceAfter = direction === 'inflow' ? Number(currentBalance) + numericAmount : Number(currentBalance) - numericAmount
+  const balanceAfter = direction === 'inflow' ? currentBalance + numericAmount : currentBalance - numericAmount
 
   const result = await db.prepare(`
     INSERT INTO financial_ledger (user_id, project_id, category, direction, amount, balance_after, status, description, created_at)
@@ -471,6 +667,13 @@ app.get('/api/projects/:id', requireAuth, async (req, res) => {
 
   const innovator = await db.prepare('SELECT id, full_name, email, company, bio, avatar_url FROM users WHERE id = $1').get(project.innovator_id)
   res.json({ project: { ...project, innovator } })
+})
+
+app.get('/api/projects/:id/milestones', requireAuth, async (req, res) => {
+  const milestones = await db.prepare(
+    'SELECT * FROM milestones WHERE project_id = $1 ORDER BY target_date ASC NULLS LAST, created_at ASC',
+  ).all(req.params.id)
+  res.json({ milestones })
 })
 
 app.post('/api/projects', requireAuth, requireRole('innovator', 'admin'), async (req, res) => {
@@ -523,25 +726,15 @@ app.get('/api/investments', requireAuth, requireRole('investor', 'admin'), async
   res.json({ investments })
 })
 
-app.post('/api/investments', requireAuth, requireRole('investor', 'admin'), async (req, res) => {
-  const { project_id, amount, equity_pct } = req.body || {}
-
-  if (!project_id || !amount) {
-    return res.status(400).json({ message: 'Project and amount are required.' })
-  }
-
-  const project = await db.prepare('SELECT * FROM projects WHERE id = $1').get(project_id)
-  if (!project) {
-    return res.status(404).json({ message: 'Project not found.' })
-  }
-
-  const result = await db.prepare(`
-    INSERT INTO investments (investor_id, project_id, amount, equity_pct, status, created_at)
-    VALUES ($1, $2, $3, $4, 'active', NOW())
-  `).run(req.user.id, project_id, Number(amount), Number(equity_pct || 0))
-
-  const investment = await db.prepare('SELECT * FROM investments WHERE id = $1').get(result.lastInsertRowid)
-  res.status(201).json({ investment })
+// REMOVED (security fix): this endpoint used to insert an investment with
+// equity_pct taken directly from the request body, and skipped every check
+// POST /api/invest enforces — funding cap, project status, self-investment,
+// and the matching ledger entries. A caller could hit this route directly
+// (it never went through the frontend's validation) and award themselves
+// arbitrary equity. All investing now goes through POST /api/invest, which
+// runs those checks inside a single database transaction.
+app.post('/api/investments', requireAuth, requireRole('investor', 'admin'), (req, res) => {
+  res.status(410).json({ message: 'This endpoint has been retired. Use POST /api/invest instead.' })
 })
 
 app.get('/api/messages', requireAuth, async (req, res) => {
@@ -557,15 +750,27 @@ app.get('/api/messages', requireAuth, async (req, res) => {
   res.json({ messages })
 })
 
+app.get('/api/message-recipients', requireAuth, async (req, res) => {
+  const recipients = await db.prepare(`
+    SELECT id, full_name, role, company, avatar_url
+    FROM users
+    WHERE id <> $1
+    ORDER BY full_name ASC, id ASC
+  `).all(req.user.id)
+
+  res.json({ recipients })
+})
+
 app.post('/api/messages', requireAuth, async (req, res) => {
   const { receiver_id, project_id, content } = req.body || {}
   const safeContent = typeof content === 'string' ? content.trim() : ''
+  const receiverId = Number(receiver_id)
 
-  if (!receiver_id || !safeContent) {
+  if (!Number.isSafeInteger(receiverId) || receiverId <= 0 || !safeContent || safeContent.length > 5000) {
     return res.status(400).json({ message: 'Receiver and message content are required.' })
   }
 
-  const receiver = await db.prepare('SELECT id FROM users WHERE id = $1').get(receiver_id)
+  const receiver = await db.prepare('SELECT id FROM users WHERE id = $1').get(receiverId)
   if (!receiver) {
     return res.status(404).json({ message: 'Recipient not found.' })
   }
@@ -574,10 +779,15 @@ app.post('/api/messages', requireAuth, async (req, res) => {
     return res.status(400).json({ message: 'You cannot message yourself.' })
   }
 
+  const projectId = project_id == null || project_id === '' ? null : Number(project_id)
+  if (projectId !== null && (!Number.isSafeInteger(projectId) || projectId <= 0)) {
+    return res.status(400).json({ message: 'Project is invalid.' })
+  }
+
   const result = await db.prepare(`
     INSERT INTO messages (sender_id, receiver_id, project_id, content, created_at)
     VALUES ($1, $2, $3, $4, NOW())
-  `).run(req.user.id, receiver_id, project_id || null, safeContent)
+  `).run(req.user.id, receiverId, projectId, safeContent)
 
   const message = await db.prepare('SELECT * FROM messages WHERE id = $1').get(result.lastInsertRowid)
   res.status(201).json({ message })
@@ -589,7 +799,7 @@ app.get('/api/community/posts', requireAuth, async (req, res) => {
     SELECT cp.*, u.full_name AS author_name, u.role AS author_role, u.avatar_url AS author_avatar
     FROM community_posts cp
     LEFT JOIN users u ON u.id = cp.author_id
-    WHERE ($1 = '' OR cp.category = $2)
+    WHERE ($1::text = '' OR cp.category = $2::text)
     ORDER BY cp.created_at DESC
   `).all(categoryFilter, categoryFilter)
 
@@ -645,11 +855,42 @@ app.get('/api/portfolio/summary', requireAuth, requireRole('investor', 'admin'),
   })
 })
 
+// ADDED: new feature routes (call requests, discussion replies, guidance, invest)
+app.use('/api', featuresRouter)
+
 app.use((err, req, res, next) => {
+  if (err && err.message === 'CORS origin not allowed') {
+    return res.status(403).json({ message: 'Origin not allowed by CORS policy.' })
+  }
+
+  if (err && typeof err.code === 'string') {
+    if (err.code === '23503') {
+      return res.status(400).json({ message: 'Referenced record does not exist (foreign key violation).' })
+    }
+    if (err.code === '23502') {
+      return res.status(400).json({ message: 'A required field is missing (null value violation).' })
+    }
+    if (err.code === '22P02') {
+      return res.status(400).json({ message: 'Invalid value format sent to the database.' })
+    }
+    if (err.code === '23505') {
+      return res.status(409).json({ message: 'A record with this value already exists.' })
+    }
+  }
+
   console.error(err)
   res.status(500).json({ message: 'Internal server error' })
 })
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Bridge Group API running on http://localhost:${PORT}`)
+})
+
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Bridge Group API could not start: port ${PORT} is already in use. Stop the existing process or set PORT to another value.`)
+  } else {
+    console.error('Bridge Group API failed to start:', error)
+  }
+  process.exitCode = 1
 })

@@ -1,18 +1,130 @@
 import { ArrowLeft, ArrowRight, CheckCircle2, CircleDollarSign, TrendingUp } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import type { AppNavigationHandler } from '../App'
-import { milestones, profiles, projects } from '../data/mockData'
+import { API_BASE_URL } from '../config'
+import { getToken } from '../lib/auth'
 
 type ProjectDetailProps = {
   projectId: string
   onNavigate: AppNavigationHandler
 }
 
-function ProjectDetail({ projectId, onNavigate }: ProjectDetailProps) {
-  const project = projects.find((item) => item.id === projectId) ?? projects[0]
-  const founder = profiles.find((profile) => profile.id === project.innovator_id) ?? profiles[0]
-  const projectMilestones = milestones.filter((milestone) => milestone.project_id === project.id)
+type Innovator = {
+  id: number
+  full_name: string
+  email: string
+  company: string | null
+  bio: string | null
+  avatar_url: string | null
+}
 
-  const fundingPct = Math.min(100, Math.round((project.funding_raised / project.funding_goal) * 100))
+type Project = {
+  id: number
+  title: string
+  category: string
+  description: string
+  problem: string
+  solution: string
+  stage: string
+  funding_goal: number
+  funding_raised: number
+  equity_offered: number
+  revenue_share_pct: number
+  roi_projection: number | null
+  status: string
+  image_url: string | null
+  innovator_id: number
+  innovator?: Innovator
+}
+
+type Milestone = {
+  id: number
+  title: string
+  description: string
+  status: string
+  target_date: string | null
+}
+
+function ProjectDetail({ projectId, onNavigate }: ProjectDetailProps) {
+  const [project, setProject] = useState<Project | null>(null)
+  const [milestonesList, setMilestonesList] = useState<Milestone[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const token = getToken()
+    if (!token) {
+      setLoading(false)
+      setError('sign-in-required')
+      return
+    }
+
+    const fetchProject = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const [projectResponse, milestonesResponse] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/projects/${projectId}`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API_BASE_URL}/api/projects/${projectId}/milestones`, { headers: { Authorization: `Bearer ${token}` } }),
+        ])
+
+        if (!projectResponse.ok) {
+          throw new Error('Project not found.')
+        }
+
+        const projectData = await projectResponse.json()
+        setProject(projectData.project)
+
+        if (milestonesResponse.ok) {
+          const milestonesData = await milestonesResponse.json()
+          setMilestonesList(milestonesData.milestones ?? [])
+        }
+      } catch (err) {
+        console.error('Failed to load project:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load project.')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchProject()
+  }, [projectId])
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#f7f1ea] text-slate-600">
+        Loading project...
+      </div>
+    )
+  }
+
+  if (error === 'sign-in-required') {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f7f1ea] text-center text-slate-700">
+        <p className="text-lg font-semibold">Sign in to view project details.</p>
+        <button className="brand-button-primary" onClick={() => onNavigate('auth')}>
+          Sign in
+          <ArrowRight className="h-4 w-4" />
+        </button>
+      </div>
+    )
+  }
+
+  if (error || !project) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#f7f1ea] text-center text-slate-700">
+        <p className="text-lg font-semibold">{error || 'Project not found.'}</p>
+        <button className="brand-button-secondary" onClick={() => onNavigate('landing')}>
+          Back home
+        </button>
+      </div>
+    )
+  }
+
+  const fundingPct = project.funding_goal
+    ? Math.min(100, Math.round((Number(project.funding_raised) / Number(project.funding_goal)) * 100))
+    : 0
+  const founder = project.innovator
 
   return (
     <div className="min-h-screen bg-[#f7f1ea] text-slate-900">
@@ -35,7 +147,7 @@ function ProjectDetail({ projectId, onNavigate }: ProjectDetailProps) {
 
       <main className="container-shell py-8">
         <div className="mb-6 flex flex-wrap items-center gap-3 text-sm text-slate-600">
-          <span className="rounded-full bg-orange-50 px-3 py-1 font-semibold text-orange-700">{project.category_name}</span>
+          <span className="rounded-full bg-orange-50 px-3 py-1 font-semibold text-orange-700">{project.category}</span>
           <span className="rounded-full border border-slate-200 bg-white px-3 py-1">{project.stage}</span>
           <span className="rounded-full border border-slate-200 bg-white px-3 py-1">{project.status}</span>
         </div>
@@ -43,15 +155,25 @@ function ProjectDetail({ projectId, onNavigate }: ProjectDetailProps) {
         <section className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
           <div className="space-y-6">
             <div className="soft-card overflow-hidden">
-              <img src={project.image_url} alt={project.title} className="h-80 w-full object-cover" />
+              {project.image_url ? (
+                <img src={project.image_url} alt={project.title} className="h-80 w-full object-cover" />
+              ) : (
+                <div className="flex h-80 w-full items-center justify-center bg-slate-100 text-slate-400">No image yet</div>
+              )}
             </div>
 
             <div className="soft-card p-6 md:p-8">
               <div className="flex items-center gap-4">
-                <img src={founder.avatar_url} alt={founder.full_name} className="h-14 w-14 rounded-full object-cover" />
+                {founder?.avatar_url ? (
+                  <img src={founder.avatar_url} alt={founder.full_name} className="h-14 w-14 rounded-full object-cover" />
+                ) : (
+                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-200 text-lg font-bold text-slate-600">
+                    {founder?.full_name?.charAt(0) ?? '?'}
+                  </div>
+                )}
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Founder</p>
-                  <h2 className="mt-1 text-xl font-extrabold text-slate-900">{project.innovator_name}</h2>
+                  <h2 className="mt-1 text-xl font-extrabold text-slate-900">{founder?.full_name ?? 'Unknown founder'}</h2>
                 </div>
               </div>
 
@@ -61,15 +183,15 @@ function ProjectDetail({ projectId, onNavigate }: ProjectDetailProps) {
               <div className="mt-8 grid gap-4 md:grid-cols-3">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-sm text-slate-500">Funding goal</p>
-                  <p className="mt-2 text-2xl font-extrabold text-slate-900">${project.funding_goal.toLocaleString()}</p>
+                  <p className="mt-2 text-2xl font-extrabold text-slate-900">${Number(project.funding_goal).toLocaleString()}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-sm text-slate-500">Raised</p>
-                  <p className="mt-2 text-2xl font-extrabold text-slate-900">${project.funding_raised.toLocaleString()}</p>
+                  <p className="mt-2 text-2xl font-extrabold text-slate-900">${Number(project.funding_raised).toLocaleString()}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-sm text-slate-500">Projected ROI</p>
-                  <p className="mt-2 text-2xl font-extrabold text-slate-900">{project.roi_projection}%</p>
+                  <p className="mt-2 text-2xl font-extrabold text-slate-900">{project.roi_projection ?? 0}%</p>
                 </div>
               </div>
 
@@ -89,24 +211,30 @@ function ProjectDetail({ projectId, onNavigate }: ProjectDetailProps) {
             <div className="soft-card p-6 md:p-8">
               <p className="section-kicker">Milestones</p>
               <div className="mt-6 space-y-4">
-                {projectMilestones.map((milestone) => (
-                  <div key={milestone.id} className="flex gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                      <CheckCircle2 className="h-4 w-4" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-900">{milestone.title}</h3>
-                          <p className="mt-1 text-sm text-slate-600">{milestone.description}</p>
+                {milestonesList.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-600">
+                    No milestones have been added for this project yet.
+                  </div>
+                ) : (
+                  milestonesList.map((milestone) => (
+                    <div key={milestone.id} className="flex gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                        <CheckCircle2 className="h-4 w-4" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-lg font-bold text-slate-900">{milestone.title}</h3>
+                            <p className="mt-1 text-sm text-slate-600">{milestone.description}</p>
+                          </div>
+                          <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+                            {milestone.status}
+                          </span>
                         </div>
-                        <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600">
-                          {milestone.status}
-                        </span>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -126,11 +254,11 @@ function ProjectDetail({ projectId, onNavigate }: ProjectDetailProps) {
               <div className="mt-4 space-y-3 text-sm text-slate-600">
                 <div className="flex items-center justify-between">
                   <span>Raised</span>
-                  <span className="font-semibold text-slate-900">${project.funding_raised.toLocaleString()}</span>
+                  <span className="font-semibold text-slate-900">${Number(project.funding_raised).toLocaleString()}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Goal</span>
-                  <span className="font-semibold text-slate-900">${project.funding_goal.toLocaleString()}</span>
+                  <span className="font-semibold text-slate-900">${Number(project.funding_goal).toLocaleString()}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Equity offered</span>
@@ -162,7 +290,7 @@ function ProjectDetail({ projectId, onNavigate }: ProjectDetailProps) {
                   </div>
                   <div>
                     <p className="font-semibold text-slate-900">Projected upside</p>
-                    <p className="text-sm text-slate-600">{project.roi_projection}% projected annual return</p>
+                    <p className="text-sm text-slate-600">{project.roi_projection ?? 0}% projected annual return</p>
                   </div>
                 </div>
 

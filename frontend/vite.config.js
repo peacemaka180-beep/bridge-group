@@ -14,6 +14,7 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       port: Number(env.VITE_PORT || 3000),
       strictPort: true,
+      allowedHosts: ['.ngrok-free.dev', '.ngrok-free.app', '.ngrok.io'],
     },
     preview: {
       host: '0.0.0.0',
