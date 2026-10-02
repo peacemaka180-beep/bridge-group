@@ -9,8 +9,10 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react'
+import type { MouseEvent } from 'react'
 import type { AppNavigationHandler } from '../App'
 import { categories } from '../data/mockData'
+import { getUser, homeFor, isLoggedIn } from '../lib/auth'
 
 const categoryIconMap = {
   Technology: Cpu,
@@ -129,6 +131,35 @@ type LandingPageProps = {
 }
 
 function LandingPage({ onNavigate }: LandingPageProps) {
+  const user = getUser()
+  const signedIn = isLoggedIn() && Boolean(user)
+  const dashboard = homeFor(user?.role)
+
+  // Signed in: go straight to your dashboard. Signed out: go to the sign-in page,
+  // remembering which button was clicked so the form can preselect the role.
+  const goToAuth = (role?: 'innovator' | 'investor', mode: 'login' | 'register' = 'register') => {
+    if (signedIn) {
+      onNavigate(dashboard)
+      return
+    }
+    localStorage.setItem('bg_auth_intent', JSON.stringify({ role, mode }))
+    onNavigate('auth')
+  }
+
+  const exploreCategory = (categoryName: string) => {
+    if (!signedIn) {
+      goToAuth()
+      return
+    }
+    localStorage.setItem('bg_selected_category', categoryName)
+    onNavigate(dashboard)
+  }
+
+  const scrollToSection = (id: string) => (event: MouseEvent) => {
+    event.preventDefault()
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
   return (
     <div className="min-h-screen bg-[#f7f1ea] text-slate-900">
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-[#f7f1ea]/80 backdrop-blur-md">
@@ -143,18 +174,32 @@ function LandingPage({ onNavigate }: LandingPageProps) {
           </div>
 
           <nav className="hidden items-center gap-8 text-sm font-medium text-slate-700 md:flex">
-            <a href="#mission" className="transition hover:text-slate-950">Mission</a>
-            <a href="#categories" className="transition hover:text-slate-950">Categories</a>
-            <a href="#how" className="transition hover:text-slate-950">How It Works</a>
+            <a href="#mission" onClick={scrollToSection('mission')} className="transition hover:text-slate-950">Mission</a>
+            <a href="#categories" onClick={scrollToSection('categories')} className="transition hover:text-slate-950">Categories</a>
+            <a href="#how" onClick={scrollToSection('how')} className="transition hover:text-slate-950">How It Works</a>
           </nav>
 
           <div className="flex items-center gap-3">
-            <button className="brand-button-secondary hidden sm:inline-flex" onClick={() => onNavigate('auth')}>
-              Sign In
-            </button>
-            <button className="brand-button-primary" onClick={() => onNavigate('auth')}>
-              Get Started Today
-            </button>
+            {signedIn ? (
+              <>
+                <span className="hidden text-sm font-medium text-slate-700 md:inline">
+                  Hi, {user?.full_name?.split(' ')[0]}
+                </span>
+                <button type="button" className="brand-button-primary" onClick={() => onNavigate(dashboard)}>
+                  Go to dashboard
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="brand-button-secondary hidden sm:inline-flex" onClick={() => goToAuth(undefined, 'login')}>
+                  Sign In
+                </button>
+                <button type="button" className="brand-button-primary" onClick={() => goToAuth()}>
+                  Get Started Today
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -179,13 +224,15 @@ function LandingPage({ onNavigate }: LandingPageProps) {
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-4">
-                <button className="brand-button-primary" onClick={() => onNavigate('auth')}>
-                  Join as Innovator
+                <button type="button" className="brand-button-primary" onClick={() => goToAuth('innovator')}>
+                  {signedIn ? 'Open my dashboard' : 'Join as Innovator'}
                   <ArrowRight className="h-4 w-4" />
                 </button>
-                <button className="brand-button-secondary" onClick={() => onNavigate('auth')}>
-                  Join as Investor
-                </button>
+                {!signedIn && (
+                  <button type="button" className="brand-button-secondary" onClick={() => goToAuth('investor')}>
+                    Join as Investor
+                  </button>
+                )}
               </div>
 
               <div className="mt-6 flex flex-wrap items-center gap-3 text-sm text-slate-600">
@@ -281,7 +328,7 @@ function LandingPage({ onNavigate }: LandingPageProps) {
           </div>
         </section>
 
-        <section id="mission" className="container-shell py-8 md:py-16">
+        <section id="mission" className="container-shell scroll-mt-24 py-8 md:py-16">
           <div className="mb-8 text-center">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Mission</p>
             <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">
@@ -305,7 +352,7 @@ function LandingPage({ onNavigate }: LandingPageProps) {
           </div>
         </section>
 
-        <section id="categories" className="container-shell py-16">
+        <section id="categories" className="container-shell scroll-mt-24 py-16">
           <div className="mb-10 text-center">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Categories</p>
             <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">
@@ -333,8 +380,9 @@ function LandingPage({ onNavigate }: LandingPageProps) {
                   </div>
                   <p className="min-h-[100px] text-sm leading-6 text-slate-600">{category.description}</p>
                   <button
+                    type="button"
                     className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-900 hover:text-orange-600"
-                    onClick={() => onNavigate('project-detail', category.id)}
+                    onClick={() => exploreCategory(category.name)}
                   >
                     Explore projects
                     <ArrowRight className="h-4 w-4" />
@@ -368,7 +416,7 @@ function LandingPage({ onNavigate }: LandingPageProps) {
           </div>
         </section>
 
-        <section id="how" className="container-shell py-16">
+        <section id="how" className="container-shell scroll-mt-24 py-16">
           <div className="mb-10 text-center">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">How Bridge Group Works</p>
             <h2 className="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 md:text-4xl">
@@ -460,11 +508,15 @@ function LandingPage({ onNavigate }: LandingPageProps) {
               </div>
 
               <div className="flex flex-col gap-4 sm:flex-row lg:justify-end">
-                <button className="brand-button-primary" onClick={() => onNavigate('auth')}>
-                  Get Started Today
+                <button type="button" className="brand-button-primary" onClick={() => goToAuth()}>
+                  {signedIn ? 'Go to dashboard' : 'Get Started Today'}
                   <ArrowRight className="h-4 w-4" />
                 </button>
-                <button className="brand-button-secondary" onClick={() => onNavigate('auth')}>Sign In</button>
+                {!signedIn && (
+                  <button type="button" className="brand-button-secondary" onClick={() => goToAuth(undefined, 'login')}>
+                    Sign In
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -479,9 +531,9 @@ function LandingPage({ onNavigate }: LandingPageProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-5 text-sm text-slate-600">
-            <a href="#mission" className="transition hover:text-slate-900">Mission</a>
-            <a href="#categories" className="transition hover:text-slate-900">Categories</a>
-            <a href="#how" className="transition hover:text-slate-900">How It Works</a>
+            <a href="#mission" onClick={scrollToSection('mission')} className="transition hover:text-slate-900">Mission</a>
+            <a href="#categories" onClick={scrollToSection('categories')} className="transition hover:text-slate-900">Categories</a>
+            <a href="#how" onClick={scrollToSection('how')} className="transition hover:text-slate-900">How It Works</a>
           </div>
 
           <p className="text-sm text-slate-500">© 2026 Bridge Group.</p>
@@ -492,3 +544,4 @@ function LandingPage({ onNavigate }: LandingPageProps) {
 }
 
 export default LandingPage
+

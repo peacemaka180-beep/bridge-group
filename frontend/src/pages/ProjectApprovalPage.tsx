@@ -1,4 +1,4 @@
-import { ArrowRight, BadgeCheck, Building2, CircleDollarSign, TrendingUp } from 'lucide-react'
+import { ArrowRight, BadgeCheck, CircleDollarSign, TrendingUp } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { AppNavigationHandler } from '../App'
 import { API_BASE_URL } from '../config'

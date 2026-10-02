@@ -52,6 +52,16 @@ create table if not exists public.users (
   created_at timestamptz not null default now()
 );
 
+create unique index if not exists users_email_lower_unique_idx on public.users (lower(email));
+
+create table if not exists public.password_reset_tokens (
+  token_hash text primary key,
+  user_id bigint not null references public.users(id) on delete cascade,
+  expires_at timestamptz not null,
+  used_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.categories (
   id bigserial primary key,
   name text not null unique,
@@ -255,3 +265,12 @@ create policy "messages_participants_read" on public.messages
 drop policy if exists "community_posts_read" on public.community_posts;
 create policy "community_posts_read" on public.community_posts
   for select to authenticated using (true);
+-- Run in psql:  \c bridge_group   then   \i 03_auth.sql
+-- Stores logged-out JWTs (by their unique id) until they would have expired anyway.
+
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+  jti        text        PRIMARY KEY,
+  expires_at timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires ON revoked_tokens (expires_at);
